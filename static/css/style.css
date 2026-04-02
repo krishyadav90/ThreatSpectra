@@ -3277,6 +3277,24 @@ body {
     font-weight: 600;
 }
 
+.verdict-explainer {
+    margin-top: 0.6rem;
+    padding: 0.9rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.verdict-explainer.safe {
+    border-color: rgba(67, 233, 123, 0.35);
+    background: linear-gradient(140deg, rgba(67, 233, 123, 0.12), rgba(46, 204, 113, 0.08));
+}
+
+.verdict-explainer.risky {
+    border-color: rgba(255, 120, 117, 0.38);
+    background: linear-gradient(140deg, rgba(255, 120, 117, 0.12), rgba(255, 107, 107, 0.08));
+}
+
 .modern-risk-factors {
     list-style: none;
     padding: 0;

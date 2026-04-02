@@ -715,6 +715,112 @@ function mapDetectionMethods(data) {
     return [mapped[source] || 'Rule-based Analysis'];
 }
 
+function getHostnameFromUrl(rawUrl) {
+    try {
+        return new URL(rawUrl).hostname.toLowerCase();
+    } catch (error) {
+        return '';
+    }
+}
+
+function hasMimicDomainPattern(rawUrl) {
+    const host = getHostnameFromUrl(rawUrl);
+    if (!host) return false;
+
+    const typoBrandPattern = /(g00gle|paypa1|arnazon|micr0soft|faceb00k|app1e|netf1ix)/i;
+    const manyHyphens = (host.match(/-/g) || []).length >= 2;
+    const manyDigits = (host.match(/\d/g) || []).length >= 3;
+    return typoBrandPattern.test(host) || manyHyphens || manyDigits;
+}
+
+function buildUrlExplanation(data, isSafe, confidence) {
+    const reasons = Array.isArray(data.reasons) ? data.reasons : [];
+    const risky = [];
+    const safe = [];
+
+    const domainAgeDays = Number(data.domain_age_days);
+    const hasKnownAge = Number.isFinite(domainAgeDays) && domainAgeDays >= 0;
+    const hasSSL = Boolean(data.has_ssl);
+    const sslValid = Boolean(data.ssl_valid);
+
+    if (!hasSSL) {
+        risky.push('No SSL certificate detected, so the connection security cannot be verified.');
+    } else if (!sslValid) {
+        risky.push('SSL certificate is invalid or expired, which reduces trust in this website.');
+    } else {
+        safe.push('A valid SSL certificate is present, which supports encrypted and secure communication.');
+    }
+
+    if (hasKnownAge && domainAgeDays <= 30) {
+        risky.push(`Domain is newly created (${domainAgeDays} days old), which is common in phishing campaigns.`);
+    }
+    if (hasKnownAge && domainAgeDays >= 180) {
+        safe.push(`Domain has been active for ${domainAgeDays} days, which is a stronger legitimacy signal.`);
+    }
+
+    if (hasMimicDomainPattern(data.url || '')) {
+        risky.push('Domain pattern looks like brand mimicry (typosquatting), a common phishing technique.');
+    }
+
+    reasons.slice(0, 6).forEach((reason) => {
+        const text = String(reason || '').trim();
+        if (!text) return;
+
+        const lowered = text.toLowerCase();
+        if (
+            lowered.includes('safe') ||
+            lowered.includes('legitimate') ||
+            lowered.includes('align with legitimate')
+        ) {
+            safe.push(text);
+            return;
+        }
+
+        if (
+            lowered.includes('high-risk') ||
+            lowered.includes('elevated') ||
+            lowered.includes('phishing') ||
+            lowered.includes('suspicious') ||
+            lowered.includes('uncertain')
+        ) {
+            risky.push(text);
+        }
+    });
+
+    if (isSafe && confidence >= 0.75) {
+        safe.push(`Model confidence is ${(confidence * 100).toFixed(1)}% for a safe classification.`);
+    }
+    if (!isSafe && confidence >= 0.75) {
+        risky.push(`Model confidence is ${(confidence * 100).toFixed(1)}% for a phishing classification.`);
+    }
+
+    const dedupe = (items) => Array.from(new Set(items));
+    const riskyFinal = dedupe(risky);
+    const safeFinal = dedupe(safe);
+
+    if (isSafe) {
+        const fallbackSafe = safeFinal.length
+            ? safeFinal
+            : ['Most evaluated signals align with legitimate website behavior.'];
+        return {
+            title: 'Why This Is Safe',
+            className: 'safe',
+            icon: 'fa-shield-check',
+            items: fallbackSafe.slice(0, 4)
+        };
+    }
+
+    const fallbackRisk = riskyFinal.length
+        ? riskyFinal
+        : ['Multiple URL and domain signals suggest phishing risk.'];
+    return {
+        title: 'Why This Is Risky',
+        className: 'risky',
+        icon: 'fa-triangle-exclamation',
+        items: fallbackRisk.slice(0, 4)
+    };
+}
+
 function resetUrlChecker() {
     if (!result || !urlInput) return;
     result.style.display = 'none';
@@ -769,6 +875,7 @@ function showResult(data) {
         : '';
     const sslError = !hasSSL && data.ssl_error ? `Note: ${escapeHtml(data.ssl_error)}` : '';
     const sslDetailParts = [sslIssuer, sslValidUntil, sslError].filter(Boolean);
+    const explanation = buildUrlExplanation(data, isSafe, confidence);
 
     result.innerHTML = `
         <div class="result-card result-card-modern analysis-card ${statusClass}">
@@ -784,8 +891,7 @@ function showResult(data) {
                         <div class="modern-progress-fill ${riskState.className}" data-width="${riskScore.toFixed(1)}"></div>
                     </div>
                     <div class="risk-meta-row">
-                        <span class="risk-label ${riskState.className}">${riskState.label}</span>
-                        <span class="risk-value">${riskScore.toFixed(1)}%</span>
+                        <span class="risk-label ${riskState.className}">Final Risk Score: ${riskScore.toFixed(1)}%</span>
                     </div>
 
                     <h5 class="mt-4"><i class="fas fa-globe"></i>Domain Information</h5>
@@ -811,6 +917,13 @@ function showResult(data) {
                     <h5><i class="fas fa-cogs"></i>Detection Methods</h5>
                     <div class="method-badge-wrap">
                         ${detectionBadges}
+                    </div>
+
+                    <h5 class="mt-4"><i class="fas ${explanation.icon}"></i>${escapeHtml(explanation.title)}</h5>
+                    <div class="verdict-explainer ${explanation.className}">
+                        <ul class="reason-list">
+                            ${explanation.items.map((reason) => `<li><i class="fas fa-check-circle"></i>${escapeHtml(reason)}</li>`).join('')}
+                        </ul>
                     </div>
                 </div>
             </div>
